@@ -1,0 +1,207 @@
+---
+output:
+  pdf_document: default
+  word_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r}
+library(sas7bdat)
+library(dplyr)
+library(reshape2)
+library(ggplot2)
+library(ggthemes)
+library(survival)
+library(survminer)
+library(zoo)
+```
+
+```{r}
+Data <- read.sas7bdat("/Users/dauku/Desktop/Courses/2019Fall/Survival/Homework1_SA/hurricane.sas7bdat")
+Data$reason <- as.factor(Data$reason)
+```
+
+### Summary statistics fro each of the types of pump station failure:
+```{r}
+# percentage of pumps that survived the hurricane
+NotSurvived <- Data %>% filter(survive == 1)
+PercentSurvived <- nrow(NotSurvived)/nrow(Data)*100
+PercentSurvived
+
+# percentage of pumps in wach type of failure
+FailurePct <- Data %>%
+  group_by(reason) %>%
+  summarise(Pct = n()/nrow(Data))
+
+# average failure time for each failure type
+AvgFailure <- Data %>%
+  group_by(reason) %>%
+  summarise(Avg = mean(hour), Median = median(hour))
+
+# Statistical test if these averages for each type of failure are different
+ANOVA <- aov(hour ~ reason, data = Data)
+summary(ANOVA)
+
+# From the ANOVA we can tell that the p-value is really small which implies that at least one type of failure is different to others
+TukeyHSD(ANOVA)
+# According to Tukey's test, only the difference between type3 and type2 is insignificant
+```
+
+### Survival probability across time for all pumps together
+```{r}
+# Creating survival object
+Together <- survfit(Surv(time = hour, event = (survive == 0)) ~ 1, data = Data)
+summary(Together)
+
+TogetherPlot <- merge(
+  data.frame(time = seq(1, 48, 1)),
+  data.frame(time = Together$time, SP = Together$surv),
+  by = "time", all = TRUE)
+
+TogetherPlot <- na.locf(TogetherPlot)
+TogetherPlot[is.na(TogetherPlot)] <- 1
+
+# survival probability across time for all pumps together
+# ggsurvplot(Together, data = Data, conf.int = FALSE, xlab = "hours", ylab = "Survival probability", legend = "none", break.y.by = 0.1)
+ggplot(TogetherPlot)+ geom_line(aes(x = time, y = SP), size = 1, color = '#8dd3c7') + scale_y_continuous(limits = c(0, 1)) +
+  labs(title =  'Overall Survival Probability',
+       y = "Survival Probability",
+       x = "Hours") + theme_hc(base_size = 10)+
+  theme(plot.title = element_text(hjust = 0.5),plot.subtitle = element_text(hjust= 0.5),legend.title=element_blank())
+```
+
+### Survival probability across time for pumps broken down by failure type overlaid into one graph
+```{r}
+Reason1 <- Data %>% filter(reason == 1)
+Reason2 <- Data %>% filter(reason == 2)
+Reason3 <- Data %>% filter(reason == 3)
+Reason4 <- Data %>% filter(reason == 4)
+Subsets <- list(Reason1, Reason2, Reason3, Reason4)
+SurvivalP <- data.frame(time = seq(1, 48, 1))
+for (i in seq(1, 4)) {
+  SurvivalModel <- survfit(Surv(time = hour, event = (survive == 0)) ~ 1, data = Subsets[[i]])
+  ModelDF <- data.frame(time = SurvivalModel$time, s = SurvivalModel$surv)
+  ColName <- paste0("Reason", as.character(i), collapse = "")
+  colnames(ModelDF) <- c("time", ColName)
+  S <- merge(data.frame(time = seq(1, 48, 1)),
+               ModelDF,
+               by = "time", all = TRUE)
+  S <- na.locf(S)
+
+
+  SurvivalP <- left_join(SurvivalP, S, by = "time")
+}
+
+SurvivalP[is.na(SurvivalP)] <- 1
+
+
+# Plotting survival curves for each failure reason
+SurvivalCurves = melt(SurvivalP, id.vars = "time", measure.vars = c("Reason1", "Reason2", "Reason3", "Reason4"))
+
+ggplot(SurvivalCurves)+ geom_line(aes(x = time, y = value, color = variable), size = 1)+
+  scale_colour_manual(values = c('#8dd3c7','#bebada', "#fb8072", "#80b1d3"),labels = c('Flood', 'Motor', 'Surge', 'Jammed'))+
+
+  labs(title =  'Survival Probability by Failure Reason',
+       y = "Survival Probability",
+       x = "Hours") + theme_hc(base_size = 10)+
+  theme(plot.title = element_text(hjust = 0.5),plot.subtitle = element_text(hjust= 0.5),legend.title=element_blank())
+```
+# Breakdown1 <- survfit(Surv(time = hour, event = (survive == 0)) ~ 1, data = Reason1)
+# Breakdown2 <- survfit(Surv(time = hour, event = (survive == 0)) ~ 1, data = Reason1)
+# 
+# summary(Breakdown)
+# ggsurvplot(Breakdown, data = Data, conf.int = FALSE, palette = c("blue", "orange", "purple", "red", "black"),
+#            xlab = "hours", ylab = "Survival Probability", break.y.by = 0.1, legend.title = "failure reasons", 
+#            legend.labs = c("0", "1", "2", "3", "4"))
+
+### Conditional failure probabilities across time for all pumps together
+```{r}
+Together$hp <- Together$n.event/Together$n.risk
+TogetherHaz <- data.frame(Time = seq(1, 48, 1), hp = Together$hp)
+
+# Visualize the overall conditional failure probability
+ggplot(TogetherHaz)+ geom_line(aes(x = Time, y = hp), size = 1, color = '#8dd3c7') +
+  labs(title =  'Overall Hazard Probability',
+       y = "Hazard Probability",
+       x = "Hours") + theme_hc(base_size = 10)+
+  theme(plot.title = element_text(hjust = 0.5),plot.subtitle = element_text(hjust= 0.5),legend.title=element_blank())
+```
+
+### Conditional failure probabilities across time break down by failure types
+```{r}
+Reason1 <- Data %>% filter(reason == 1)
+Reason2 <- Data %>% filter(reason == 2)
+Reason3 <- Data %>% filter(reason == 3)
+Reason4 <- Data %>% filter(reason == 4)
+Subsets <- list(Reason1, Reason2, Reason3, Reason4)
+
+HazFinal <- data.frame(time = seq(1, 48, 1))
+
+for (i in seq(1, 4)) {
+  HazModel <- survfit(Surv(time = hour, event = (survive == 0)) ~ 1, data = Subsets[[i]])
+  HazModel$hp <- HazModel$n.event/HazModel$n.risk
+  
+  HazValue <- data.frame(time = HazModel$time, hp = HazModel$hp)
+  ColName <- paste0("Reason", as.character(i), collapse = "")
+  colnames(HazValue) <- c("time", ColName)
+  
+  Haz <- merge(data.frame(time = seq(1, 48, 1)),
+               HazValue,
+               by = "time", all = TRUE)
+  Haz[is.na(Haz) == TRUE] <- 0
+  
+  
+  HazFinal <- left_join(HazFinal, Haz, by = "time")
+}
+
+# HazModel <- survfit(Surv(time = hour, event = (survive == 0)) ~ reason, data = Data)
+# summary(HazModel)
+# str(a)
+# a$
+# 
+# HazModel$n.event
+# 
+# HazFinal <- data.frame(time = seq(1, 48, 1))
+# for (i in seq(1, 4)) {
+#   HazModel <- survfit(Surv(time = hour, event = (survive == 0)) ~ 1, data = Data)
+#   HazModel$hp <- HazModel$n.event/HazModel$n.risk
+#   
+#   Haz <- merge(data.frame(time = seq(1, 48, 1)),
+#                data.frame(time = HazModel$time, hp = HazModel$hp),
+#                by = "time", all = TRUE)
+#   Haz[is.na(Haz) == TRUE] <- 0
+#   
+# 
+#   HazFinal <- left_join(HazFinal, Haz, by = "time")
+# }
+# 
+# colnames(HazFinal) <- c("time", "reason1", "reason2", "reason3", "reason4")
+
+library(reshape2)
+HazEachReason = melt(HazFinal, id.vars = "time", measure.vars = c("Reason1", "Reason2", "Reason3", "Reason4"))
+
+ggplot(HazEachReason)+ geom_line(aes(x = time, y = value, color = variable), size = 1)+
+  scale_colour_manual(values = c('#8dd3c7','#bebada', "#fb8072", "#80b1d3"),labels = c('Flood', 'Motor', 'Surge', 'Jammed'))+
+
+  labs(title =  'Hazard Probability by Reason',
+       y = "Hazard Probability",
+       x = "Hours") + theme_hc(base_size = 10)+
+  theme(plot.title = element_text(hjust = 0.5),plot.subtitle = element_text(hjust= 0.5),legend.title=element_blank())
+```
+
+
+### Test if the major types of failure have similar survival probabilities across time
+```{r}
+# Water-based: flood and surge have the same survival curve?
+survdiff(Surv(time = hour, event = (survive == 0)) ~ reason, rho = 1, data = Data)
+
+# According to the visualization of the survival curve, the grouping most likely should be reason2-reason3, reason1, reason4. Here we want to focus on testing whether reason 1 is significantly different with reason2 and reason3
+pairwise_survdiff(Surv(time = hour, event = (survive == 0)) ~ reason, data = Data, p.adjust.method = "bonferroni", rho = 1)
+
+Reason123 <- Data %>% filter(reason == 1 | reason == 2 | reason == 3)
+pairwise_survdiff(Surv(time = hour, event = (survive == 0)) ~ reason, data = Reason123, p.adjust.method = "bonferroni", rho = 0)
+
+Reason23 <- Data %>% filter(reason == 2 | reason == 3)
+survdiff(Surv(time = hour, event = (survive == 0)) ~ reason, rho = 1, data = Reason23)
+```
