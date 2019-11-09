@@ -17,6 +17,7 @@ library(survminer)
 library(zoo)
 ```
 
+### Reading data
 ```{r}
 Data <- read.sas7bdat("/Users/dauku/Desktop/Courses/2019Fall/Survival/Homework1_SA/hurricane.sas7bdat")
 Data$reason <- as.factor(Data$reason)
@@ -59,11 +60,11 @@ TogetherPlot <- merge(
   data.frame(time = Together$time, SP = Together$surv),
   by = "time", all = TRUE)
 
+# Impute the values for the missing time
 TogetherPlot <- na.locf(TogetherPlot)
 TogetherPlot[is.na(TogetherPlot)] <- 1
 
-# survival probability across time for all pumps together
-# ggsurvplot(Together, data = Data, conf.int = FALSE, xlab = "hours", ylab = "Survival probability", legend = "none", break.y.by = 0.1)
+# Visualize the survival probability
 ggplot(TogetherPlot)+ geom_line(aes(x = time, y = SP), size = 1, color = '#8dd3c7') + scale_y_continuous(limits = c(0, 1)) +
   labs(title =  'Overall Survival Probability',
        y = "Survival Probability",
@@ -73,11 +74,14 @@ ggplot(TogetherPlot)+ geom_line(aes(x = time, y = SP), size = 1, color = '#8dd3c
 
 ### Survival probability across time for pumps broken down by failure type overlaid into one graph
 ```{r}
+# Subset the data
 Reason1 <- Data %>% filter(reason == 1)
 Reason2 <- Data %>% filter(reason == 2)
 Reason3 <- Data %>% filter(reason == 3)
 Reason4 <- Data %>% filter(reason == 4)
 Subsets <- list(Reason1, Reason2, Reason3, Reason4)
+
+# Prepare the data for visualization
 SurvivalP <- data.frame(time = seq(1, 48, 1))
 for (i in seq(1, 4)) {
   SurvivalModel <- survfit(Surv(time = hour, event = (survive == 0)) ~ 1, data = Subsets[[i]])
@@ -107,16 +111,10 @@ ggplot(SurvivalCurves)+ geom_line(aes(x = time, y = value, color = variable), si
        x = "Hours") + theme_hc(base_size = 10)+
   theme(plot.title = element_text(hjust = 0.5),plot.subtitle = element_text(hjust= 0.5),legend.title=element_blank())
 ```
-# Breakdown1 <- survfit(Surv(time = hour, event = (survive == 0)) ~ 1, data = Reason1)
-# Breakdown2 <- survfit(Surv(time = hour, event = (survive == 0)) ~ 1, data = Reason1)
-# 
-# summary(Breakdown)
-# ggsurvplot(Breakdown, data = Data, conf.int = FALSE, palette = c("blue", "orange", "purple", "red", "black"),
-#            xlab = "hours", ylab = "Survival Probability", break.y.by = 0.1, legend.title = "failure reasons", 
-#            legend.labs = c("0", "1", "2", "3", "4"))
 
 ### Conditional failure probabilities across time for all pumps together
 ```{r}
+# Calculate the hazard probabilities
 Together$hp <- Together$n.event/Together$n.risk
 TogetherHaz <- data.frame(Time = seq(1, 48, 1), hp = Together$hp)
 
@@ -130,12 +128,14 @@ ggplot(TogetherHaz)+ geom_line(aes(x = Time, y = hp), size = 1, color = '#8dd3c7
 
 ### Conditional failure probabilities across time break down by failure types
 ```{r}
+# Subset data
 Reason1 <- Data %>% filter(reason == 1)
 Reason2 <- Data %>% filter(reason == 2)
 Reason3 <- Data %>% filter(reason == 3)
 Reason4 <- Data %>% filter(reason == 4)
 Subsets <- list(Reason1, Reason2, Reason3, Reason4)
 
+# Make the data for visualization
 HazFinal <- data.frame(time = seq(1, 48, 1))
 
 for (i in seq(1, 4)) {
@@ -155,29 +155,8 @@ for (i in seq(1, 4)) {
   HazFinal <- left_join(HazFinal, Haz, by = "time")
 }
 
-# HazModel <- survfit(Surv(time = hour, event = (survive == 0)) ~ reason, data = Data)
-# summary(HazModel)
-# str(a)
-# a$
-# 
-# HazModel$n.event
-# 
-# HazFinal <- data.frame(time = seq(1, 48, 1))
-# for (i in seq(1, 4)) {
-#   HazModel <- survfit(Surv(time = hour, event = (survive == 0)) ~ 1, data = Data)
-#   HazModel$hp <- HazModel$n.event/HazModel$n.risk
-#   
-#   Haz <- merge(data.frame(time = seq(1, 48, 1)),
-#                data.frame(time = HazModel$time, hp = HazModel$hp),
-#                by = "time", all = TRUE)
-#   Haz[is.na(Haz) == TRUE] <- 0
-#   
-# 
-#   HazFinal <- left_join(HazFinal, Haz, by = "time")
-# }
-# 
-# colnames(HazFinal) <- c("time", "reason1", "reason2", "reason3", "reason4")
 
+# Visualization
 library(reshape2)
 HazEachReason = melt(HazFinal, id.vars = "time", measure.vars = c("Reason1", "Reason2", "Reason3", "Reason4"))
 
@@ -196,12 +175,12 @@ ggplot(HazEachReason)+ geom_line(aes(x = time, y = value, color = variable), siz
 # Water-based: flood and surge have the same survival curve?
 survdiff(Surv(time = hour, event = (survive == 0)) ~ reason, rho = 1, data = Data)
 
-# According to the visualization of the survival curve, the grouping most likely should be reason2-reason3, reason1, reason4. Here we want to focus on testing whether reason 1 is significantly different with reason2 and reason3
-pairwise_survdiff(Surv(time = hour, event = (survive == 0)) ~ reason, data = Data, p.adjust.method = "bonferroni", rho = 1)
+Failed = Data %>% filter(reason == 1 | reason == 2 | reason == 3 | reason == 4)
 
-Reason123 <- Data %>% filter(reason == 1 | reason == 2 | reason == 3)
-pairwise_survdiff(Surv(time = hour, event = (survive == 0)) ~ reason, data = Reason123, p.adjust.method = "bonferroni", rho = 0)
+# Pairwise survival curve comparision
+# Wilcox
+pairwise_survdiff(Surv(time = hour, event = (survive == 0)) ~ reason, data = Failed, p.adjust.method = "bonferroni", rho = 1)
 
-Reason23 <- Data %>% filter(reason == 2 | reason == 3)
-survdiff(Surv(time = hour, event = (survive == 0)) ~ reason, rho = 1, data = Reason23)
+# Log-rank
+pairwise_survdiff(Surv(time = hour, event = (survive == 0)) ~ reason, data = Failed, p.adjust.method = "bonferroni", rho = 0)
 ```
