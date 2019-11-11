@@ -1,0 +1,96 @@
+---
+output:
+  pdf_document: default
+  word_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r}
+library(sas7bdat)
+library(dplyr)
+library(reshape2)
+library(ggplot2)
+library(ggthemes)
+library(survival)
+library(survminer)
+library(zoo)
+library(flexsurv)
+```
+
+### Reading data
+```{r}
+Data <- read.sas7bdat("/Users/dauku/Desktop/Courses/2019Fall/Survival/Homework1_SA/hurricane.sas7bdat")
+Data$reason <- as.factor(Data$reason)
+Data$Flood <- sapply(Data$reason, function(x) {
+  if (x == 1) {
+    return(1)
+  } else {
+    return(0)
+  }
+})
+```
+
+### Determine the appropriate distribution
+```{r}
+DistList = c("gamma", "exp", "weibull", "lnorm", "llogis")
+
+for (dist in DistList) {
+  Weibull <- flexsurvreg(Surv(hour, Flood == 1) ~
+                           backup + age + bridgecrane + servo + gear + trashrack + slope + elevation,
+                         data = Data, dist = dist)
+  
+  plot(Weibull, type = "cumhaz", ci = TRUE, conf.int = FALSE, las = 1, bty = "n",
+       xlab = "Hour", ylab = "Cumulative Hazard", main = paste(dist, "Distribution", collapse = " "))
+}
+```
+From the plots, we can tell exponential distribution is off a lot, so we will exclude exponential from our distrubution candidate list.
+
+```{r}
+# Calculate likelihood function for each distribution
+LikeTestList <- c("gamma", "weibull", "lnorm", "llogis")
+DistPvalues <- data.frame("Dist" = LikeTestList)
+DistPvalues$like <- sapply(DistPvalues$Dist, function(x) {
+  Model <- flexsurvreg(Surv(hour, Flood == 1) ~ 
+                              backup + age + bridgecrane + servo + gear + trashrack + slope + elevation,
+                         data = Data, dist = as.character(x))
+  return(Model$loglik)
+})
+
+# Goodness-of-fit test
+w.g <- 1 - pchisq((-2 * (as.numeric(DistPvalues %>% filter(Dist == "weibull") %>% select(like)) - as.numeric(DistPvalues %>% filter(Dist == "gamma") %>% select(like)))), 1)
+
+ln.g <- 1 - pchisq((-2 * (as.numeric(DistPvalues %>% filter(Dist == "lnorm") %>% select(like)) - as.numeric(DistPvalues %>% filter(Dist == "gamma") %>% select(like)))), 1)
+```
+# From the statistical formal test we can conclude that gamma is better than log-normal, and weibull is better than gamma.
+
+### Variable selection using backward selection
+```{r}
+Model1 <- survreg(Surv(hour, Flood == 1) ~ 
+                              backup + age + bridgecrane + servo + gear + trashrack + slope + elevation, data = Data, dist = "weibull")
+summary(Model1)
+
+Model2 <- survreg(Surv(hour, Flood == 1) ~ 
+                              backup + bridgecrane + servo + gear + trashrack + slope + elevation, data = Data, dist = "weibull")
+summary(Model2)
+
+Model3 <- survreg(Surv(hour, Flood == 1) ~ 
+                              backup + servo + gear + trashrack + slope + elevation, data = Data, dist = "weibull")
+summary(Model3)
+
+Model4 <- survreg(Surv(hour, Flood == 1) ~ 
+                              backup + servo + gear + trashrack + slope, data = Data, dist = "weibull")
+summary(Model4)
+
+Model5 <- survreg(Surv(hour, Flood == 1) ~ 
+                              backup + servo + trashrack + slope, data = Data, dist = "weibull")
+summary(Model5)
+
+Model6 <- survreg(Surv(hour, Flood == 1) ~ 
+                              backup + servo + slope, data = Data, dist = "weibull")
+summary(Model6)
+```
+The most significant variable is slope. 45.4% decrease in the expected survival time for each one-unit increases in slope.
+
+###
+

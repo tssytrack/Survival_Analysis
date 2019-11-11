@@ -104,7 +104,7 @@ SurvivalP[is.na(SurvivalP)] <- 1
 SurvivalCurves = melt(SurvivalP, id.vars = "time", measure.vars = c("Reason1", "Reason2", "Reason3", "Reason4"))
 
 ggplot(SurvivalCurves)+ geom_line(aes(x = time, y = value, color = variable), size = 1)+
-  scale_colour_manual(values = c('#8dd3c7','#bebada', "#fb8072", "#80b1d3"),labels = c('Flood', 'Motor', 'Surge', 'Jammed'))+
+  scale_colour_manual(values = c('#4daf4a','#e41a1c', "#377eb8", "#984ea3"),labels = c('Flood', 'Motor', 'Surge', 'Jammed'))+
 
   labs(title =  'Survival Probability by Failure Reason',
        y = "Survival Probability",
@@ -161,7 +161,7 @@ library(reshape2)
 HazEachReason = melt(HazFinal, id.vars = "time", measure.vars = c("Reason1", "Reason2", "Reason3", "Reason4"))
 
 ggplot(HazEachReason)+ geom_line(aes(x = time, y = value, color = variable), size = 1)+
-  scale_colour_manual(values = c('#8dd3c7','#bebada', "#fb8072", "#80b1d3"),labels = c('Flood', 'Motor', 'Surge', 'Jammed'))+
+  scale_colour_manual(values = c('#4daf4a','#e41a1c', "#377eb8", "#984ea3"),labels = c('Flood', 'Motor', 'Surge', 'Jammed'))+
 
   labs(title =  'Hazard Probability by Reason',
        y = "Hazard Probability",
