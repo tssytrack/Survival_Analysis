@@ -22,6 +22,7 @@ library(flexsurv)
 ```{r}
 Data <- read.sas7bdat("/Users/dauku/Desktop/Courses/2019Fall/Survival/Homework1_SA/hurricane.sas7bdat")
 Data$reason <- as.factor(Data$reason)
+Data$pumpid <- seq(1, nrow(Data))
 Data$Flood <- sapply(Data$reason, function(x) {
   if (x == 1) {
     return(1)
@@ -29,6 +30,44 @@ Data$Flood <- sapply(Data$reason, function(x) {
     return(0)
   }
 })
+```
+
+### Here is just I want to make the cummulative hazard fuction fancier, not finished yet
+```{r}
+# red line
+WeibullCurve <- flexsurvreg(Surv(hour, Flood == 1) ~
+                           backup + age + bridgecrane + servo + gear + trashrack + slope + elevation,
+                         data = Data, dist = "weibull")
+WeibullRed <- summary(WeibullCurve, type = "cumhaz", ci = TRUE, tidy = TRUE)
+WeibullCurve$dlist
+
+WeibullKM <- survfit(Surv(hour, Flood == 1) ~ 1,
+                         data = Data, type = "kaplan-meier", conf.type = "log")$cumhaz
+
+Plotting = WeibullRed %>% dplyr::select(1:4)
+Plotting$cumhaz = WeibullKM
+
+Cumhaz = data.frame(time = seq(1, 48), Cumhaz = WeibullKM)
+Cum = melt(Cumhaz, id.vars = "time", measure.vars = "Cumhaz")
+Curves = melt(Plotting, id.vars = "time", measure.vars = c("est", "lcl", "ucl"))
+
+ggplot(Curves)+ geom_line(aes(x = time, y = value, color = variable), size = 1)+
+  scale_colour_manual(values = c('#4daf4a','#e41a1c', "#377eb8", "#984ea3"),labels = c('est', 'lcl', 'ucl', 'cumhaz'))+
+
+  labs(title =  'Theoretical Weibull cumulative hazard function',
+       y = "cumulative hazard probability",
+       x = "Hours") + theme_hc(base_size = 10)+
+  theme(plot.title = element_text(hjust = 0.5),plot.subtitle = element_text(hjust= 0.5),legend.title=element_blank())
+
+ggplot() + 
+  geom_step(data=Cum,mapping=aes(x=time,y=value, color = variable),
+            linetype="dashed") +
+  geom_line(data=Curves,mapping=aes(x=time, y=value, color = variable),
+            linetype=1) + ylab('Cumulative Hazard Function') + xlab('time') +  scale_colour_manual(values = c("black", "red",'#f1a340', '#f1a340'),labels = c("Actual-CHP", 'Estimated CHP', 'Confidence Interval', 'Confidence Interval'))+
+  labs(title =  'Theoretical Weibull Cumulative Hazard Function',
+       y = "Cumulative Hazard Probability",
+       x = "Hours")+theme_classic(base_size = 18)+
+  theme(plot.title = element_text(hjust = 0.5),plot.subtitle = element_text(hjust= 0.5),legend.title=element_blank())
 ```
 
 ### Determine the appropriate distribution
@@ -92,5 +131,38 @@ summary(Model6)
 ```
 The most significant variable is slope. 45.4% decrease in the expected survival time for each one-unit increases in slope.
 
-###
+### Predicted Survial Probability at t
+```{r}
+survprob.actual <- 1 - psurvreg(Data$hour, mean = predict(Model6, type = "lp"),
+                                scale = Model6$scale, distribution = Model6$dist)
+```
+
+### Predicted change in event time due to backup
+```{r}
+Backup <- qsurvreg(1 - survprob.actual, mean = predict(Model6, type = "lp") + coef(Model6)["backup"],
+                   scale = Model6$scale, distribution = Model6$dist)
+Data$t_backup <- Backup
+Data$diff_backup <- Data$t_backup - Data$hour
+```
+
+### Predicted change in event time due to servo
+```{r}
+Servo <- qsurvreg(1 - survprob.actual, mean = predict(Model6, type = "lp") + coef(Model6)["servo"],
+                   scale = Model6$scale, distribution = Model6$dist)
+Data$t_servo <- Servo
+Data$diff_servo <- Data$t_servo - Data$hour
+
+Data2 <- Data %>% filter(Flood == 1)
+```
+
+### Select the best upgrade
+```{r}
+Upgrade <- Data %>% filter(Flood == 1)
+Upgrade$Diff <- Upgrade$diff_servo - Upgrade$diff_backup
+
+# upgrade list
+UpgradeList <- Upgrade %>% arrange(desc(diff_servo)) %>% slice(1:16) %>% dplyr::select(pumpid, hour, t_servo, diff_servo)
+UpgradeList %>% summarise(sum = sum(diff_servo))
+```
+
 
