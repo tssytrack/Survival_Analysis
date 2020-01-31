@@ -6,3 +6,224 @@ output:
     df_print: paged
 ---
 
+```{r}
+library(sas7bdat)
+library(dplyr)
+library(reshape2)
+library(ggplot2)
+library(ggthemes)
+library(survival)
+library(survminer)
+library(zoo)
+library(flexsurv)
+```
+
+### Reading data
+```{r}
+Data <- read.sas7bdat("/Users/dauku/Desktop/Courses/2019Fall/Survival/Homework1_SA/hurricane.sas7bdat")
+Data$reason <- as.factor(Data$reason)
+Data$pumpid <- seq(1, nrow(Data))
+Data[is.na(Data)] <- 0
+
+Motor <- sapply(Data$reason, function(x) {
+  if (x == 2) {
+    return(1)
+  } else {
+    return(0)
+  }
+})
+
+Data$survive <- Motor
+
+```
+
+### Process Data
+```{r}
+Hours12 = apply(Data[, 9:56], MARGIN = 1, FUN = function(h) {
+  store = matrix(ncol = 48)
+  for (i in seq(12, 48)) {
+    Sum <- sum(h[(i-11):i])
+    if (Sum == 12) {
+      store[i] <- 1
+    } else {
+      store[i] <- 0
+    }
+  }
+  return(store)
+})
+
+Hours12 <- t(Hours12)
+Hours12[, 1:11] <- 0
+
+DataMatrix <- as.matrix(Data)
+New <- cbind(DataMatrix[, 1:8], Hours12, DataMatrix[, 57:60])
+ColName <- colnames(Data)[1:60]
+
+colnames(New) <- ColName
+
+NewData <- as.data.frame(New)
+
+DataLong <- reshape(data = NewData, varying = paste0("h", 1:48), v.names = "motor_working",
+                    timevar = "time", idvar = "id", direction = "long", sep = "")
+
+library(doBy)
+DataLong <- orderBy(~ + id + time, data = DataLong)
+
+library(plyr)
+library(doMC)
+registerDoMC()
+DataLong <- ddply(.data = DataLong, .variable = c("id"),
+                  .drop = TRUE, .parallel = TRUE, .fun = function(DF) {
+                    DF$start <- c(0, head(DF$time, -1))
+                    DF$stop <- DF$time
+                    DF
+                  })
+
+Long <- DataLong %>%
+  group_by(id) %>%
+  slice(1:hour)
+
+motor_working <- as.matrix(Long$motor_working)
+ID <- as.matrix(Long$id)
+j <- 1
+indicator <- matrix(nrow = nrow(Long))
+indicator[1] <- 1
+
+for (i in seq(1, nrow(Long))) {
+  if (i > 1) {
+    if (ID[i] != ID[i-1]) {
+      j <- 1
+    }
+    if (motor_working[i] == motor_working[i-1]) {
+      indicator[i] <- j
+    } else if ((motor_working[i] != motor_working[i-1]) & (ID[i] != ID[i-1])) {
+      indicator[i] <- 1
+    } else {
+      j <- j + 1
+      indicator[i] <- j
+    }
+  }
+}
+
+Long$indicator <- indicator
+
+LongShort <- Long %>%
+  group_by(id, indicator) %>% 
+  filter(row_number()==1 | row_number()==n()) %>%
+  ungroup() %>% 
+  group_by(id) %>%
+  mutate(stop = dplyr::lead(stop)) %>%
+  ungroup()
+
+LongShort <- LongShort %>%
+  group_by(id, indicator) %>%
+  filter(row_number()==1) %>%
+  ungroup() %>% 
+  dplyr::select(backup, age, bridgecrane, servo, gear, trashrack, slope, elevation, survive, hour, motor_working, id,
+                start, stop, indicator)
+
+LongShort$stop[is.na(LongShort$stop)] <- LongShort$hour[is.na(LongShort$stop)]
+
+dplyr::rename(LongShort, motor = survive)
+# lg <- function(x)c(NA, x[1:(length(x)-1)])
+# library(data.table)
+# ddt <- data.table(LongShort)
+# LongShort <- ddt[,newstart := lg(start), by = c("id", "indicator")]
+# 
+# LongShort <- LongShort %>%
+#   dplyr::select(backup, age, bridgecrane, servo, gear, trashrack, slope, elevation, survive, hour, time, motor_working, id,
+#                 newstart, stop, indicator) %>%
+#   group_by(id, indicator) %>%
+#   filter(row_number() == n())
+# 
+# test <- LongShort %>%
+#   group_by(id) %>%
+#   mutate(newstart = lag(start, order_by = id))
+# 
+#   mutate(newstart = replace(newstart, start == 0, 0)) %>%
+#   dplyr::select(backup, age, bridgecrane, servo, gear, trashrack, slope, elevation, survive, hour, time, motor_working, id,
+#                 newstart, stop, indicator)
+```
+
+```{r}
+# Variable selection
+library(MASS)
+stepAIC(coxph(Surv(hour, survive == 0) ~ backup + age + bridgecrane + servo + gear + trashrack + slope + elevation,
+              data = Data))
+```
+
+
+Cox
+```{r}
+# Checking assumption
+ph1 <- coxph(Surv(hour, survive == 0) ~ backup + age + bridgecrane + servo + gear + trashrack + slope + elevation,
+             data = Data)
+
+summary(ph1)
+
+# proportional hazard test
+ph1.zph.log <- cox.zph(ph1, transform = log)
+log.table <- ph1.zph.log$table
+
+ph1.zph.identity <- cox.zph(ph1, transform = identity)
+identity.table <- ph1.zph.identity$table
+
+pvalues <- cbind(log.table[, 3], identity.table[, 3])
+pvalues <- data.frame(pvalues)
+colnames(pvalues) <- c("log", "identity")
+adjust <- c("met", "identity", "met", "log", "met", "met", "identity", "identity", NA)
+pvalues$adjust <- adjust
+
+# time dependent coefficient
+ph1.tdc <- coxph(Surv(hour, survive == 0) ~ backup + age + bridgecrane + servo + gear + trashrack + slope + elevation +
+                   tt(age) + tt(servo) + tt(slope) + tt(elevation), data = Data, 
+                 tt = list(
+                   function(x, time, ...){x*time},
+                   function(x, time, ...){x*log(time)},
+                   function(x, time, ...){x*time},
+                   function(x, time, ...){x*time})
+                 )
+summary(ph1.tdc)
+```
+
+```{r}
+# Time dependent variable 
+sapply(LongShort, class)
+LongShort$age <- as.numeric(LongShort$age)
+LongShort$slope <- as.numeric(LongShort$slope)
+LongShort$elevation <- as.numeric(LongShort$elevation)
+LongShort$hour <- as.numeric(LongShort$hour)
+
+ph.long <- coxph(Surv(start, stop, motor == 1) ~ backup + age + bridgecrane + servo + gear + trashrack + slope +
+                   elevation + motor_working, data = LongShort)
+
+summary(ph.long)
+
+library(MASS)
+stepAIC(coxph(Surv(hour, Motor == 1) ~ backup + age + bridgecrane + servo + gear + trashrack + slope + elevation + mortor_working
+                   + t1(age) + t2(servo) + t1(slope) + t1(elevation), data = LongShort, 
+                 t1 = function(x, time){x*time}, t2 = function(x, time){x*log(time)}
+                 ))
+
+```
+
+# including both time dependent variable and coefficient
+ph.long.both <- coxph(Surv(start, stop, survive == 0) ~ backup + age + bridgecrane + servo + gear + trashrack + slope +
+                   elevation + motor_working + tt(age) + tt(servo) + tt(trashrack) + tt(slope), data = Long, 
+                 tt = list(
+                   function(x, time, ...){x*time},
+                   function(x, time, ...){x*log(time)},
+                   function(x, time, ...){x*time},
+                   function(x, time, ...){x*time}))
+
+# ph1.tdc <- coxph(Surv(hour, survive == 0) ~ backup + age + bridgecrane + servo + gear + trashrack + slope + elevation +
+#                    tt(age) + tt(servo) + tt(trashrack) + tt(slope), data = Data, 
+#                  tt = list(
+#                    function(x, time, ...){x*time},
+#                    function(x, time, ...){x*log(time)},
+#                    function(x, time, ...){x*time},
+#                    function(x, time, ...){x*time})
+#                  )
+summary(ph.long.both)
+```
+
