@@ -6,8 +6,8 @@
 | Done?                    | Assignment             | Due Date |
 |--------------------------|------------------------|----------|
 | :heavy_check_mark:       | Survival Analysis HW 1 |11/11/2019|
-| :heavy_check_mark:       | Survival Analysis HW 2 |          |
-| :heavy_check_mark:       | Survival Analysis HW 3 |          |
+| :heavy_check_mark:       | Survival Analysis HW 2 |11/22/2019|
+| :heavy_check_mark:       | Survival Analysis HW 3 |11/28/2019|
 
 
 
